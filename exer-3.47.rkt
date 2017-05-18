@@ -1,0 +1,76 @@
+#lang racket
+(require scheme/mpair)
+
+(define (make-serializer)
+  (let ((mutex (make-mutex)))
+    (lambda (p)
+      (define (serialized-p . args)
+        (mutex 'acquire)
+        (let ((val (apply p args)))
+          (mutex 'release)
+          val))
+      serialized-p)))
+
+(define (make-mutex)
+  (let ((cell (list false)))
+    (define (the-mutex m)
+      (cond ((eq? m 'acquire)
+             (cond ((test-and-set! cell)
+                    (the-mutex 'acquire))))
+            ((eq? m 'release) (clear! cell))))
+    the-mutex))
+
+(define (clear! cell)
+  (set-mcar! cell false))
+
+(define (test-and-set! cell)
+  (if (mcar cell)
+      true
+      (begin (set-mcar! cell true)
+             false)))
+
+;a
+
+(define (make-semaphore maximum-clients)
+  (let ((access-mutex (make-mutex))
+        (exceeded-mutex (make-mutex))
+        (clients 0))
+    (define (the-semaphore message)
+      (cond ((eq? message 'acquire)
+             (access-mutex 'acquire)
+             (cond ((> clients maximum-clients)
+                    (access-mutex 'release)
+                    (exceeded-mutex 'acquire)
+                    (the-semaphore 'acquire))
+                   (else
+                    (set! clients (+ clients 1))
+                    (cond ((= clients maximum-clients)
+                           (exceeded-mutex 'acquire)))
+                    (access-mutex 'release))))
+            ((eq? message 'release)
+             (access-mutex 'acquire)
+             (set! clients (- clients 1))
+             (exceeded-mutex 'release))))
+    the-semaphore))
+
+;b
+
+(define (make-sign n)
+  (let ((cell (mlist false))
+        (count n))
+    (define (the-signal m)
+      (cond ((eq? m 'acquire)
+             (cond ((test-and-set! cell)
+                    (the-signal 'acquire)))
+             (cond ((< count 0)
+                    (clear! cell)
+                    (the-signal 'acquire))
+                   (else
+                    (set! count (- count 1))
+                    (clear! cell))))
+            ((eq? m 'release)
+             (cond (test-and-set! cell)
+                   (the-signal 'release))
+             (set! count (+ count 1))
+             (clear! cell))))
+    the-signal))
